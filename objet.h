@@ -5,9 +5,17 @@
 #ifndef UNTITLED3_OBJET_H
 #define UNTITLED3_OBJET_H
 
-
+#include <iomanip>
 #include "main.cpp"
 #include "semaphore.h"
+#include "time.h"
+sem_t priority;
+sem_t printSem;
+sem_t clockSem;
+sem_t threadsSem;
+sem_t sem_elements[6] = {1,1,1,1,1,1};
+sem_t sem_objet[6] = {1,1,1,1,1,1};
+char buf[6][100];
 
 enum element {Or, Argent, Bois, Metal, Diamants, Fer};
 std::ostream& operator<<(std::ostream& out, const element value){
@@ -20,6 +28,7 @@ std::ostream& operator<<(std::ostream& out, const element value){
         PROCESS_VAL(Metal);
         PROCESS_VAL(Diamants);
         PROCESS_VAL(Fer);
+        default: break;
     }
 #undef PROCESS_VAL
 
@@ -30,10 +39,11 @@ std::ostream& operator<<(std::ostream& out, const ElemState value){
     const char* s = 0;
 #define PROCESS_VAL(p, n) case(p): s = #n;  break;
     switch(value){
-        PROCESS_VAL(AWAITING, "attente de ");
-        PROCESS_VAL(FREE, "Liberé ");
-        PROCESS_VAL(ALLOCATED, "alloué ");
-        PROCESS_VAL(NOT_REQUESTED, "pas de requete");
+        PROCESS_VAL(AWAITING,       | attente de : );
+        PROCESS_VAL(FREE,           | Libère : );
+        PROCESS_VAL(ALLOCATED,      |  possède :);
+        PROCESS_VAL(NOT_REQUESTED,  | pas demandé :);
+        default: s="nan"; break;
     }
 #undef PROCESS_VAL
 
@@ -42,11 +52,12 @@ std::ostream& operator<<(std::ostream& out, const ElemState value){
 enum State {INITIATING, BLOCKED, COMPLETED};
 std::ostream& operator<<(std::ostream& out, const State value){
     const char* s = 0;
-#define PROCESS_VAL(p) case(p): s = #p; break;
+#define PROCESS_VAL(p, n) case(p): s = #n; break;
     switch(value){
-        PROCESS_VAL(INITIATING);
-        PROCESS_VAL(BLOCKED);
-        PROCESS_VAL(COMPLETED);
+        PROCESS_VAL(INITIATING, __initié__    );
+        PROCESS_VAL(BLOCKED,    __bloqué__       );
+        PROCESS_VAL(COMPLETED,  _complété_   );
+        default: s="nan"; break;
     }
 #undef PROCESS_VAL
 
@@ -56,34 +67,39 @@ enum statusrow {threadId,threadobjet ,objetId , threadstatus, statuse1 , element
 enum Type{ COUPE_DE_VIN, PORTE, TABLE, BAGUE, CHANDELIER, EPEE };
 std::ostream& operator<<(std::ostream& out, const Type value){
     const char* s = 0;
-#define PROCESS_VAL(p) case(p): s = #p; break;
+#define PROCESS_VAL(p,n) case(p): s = #n; break;
     switch(value){
-        PROCESS_VAL(COUPE_DE_VIN);
-        PROCESS_VAL(PORTE);
-        PROCESS_VAL(TABLE);
-        PROCESS_VAL(BAGUE);
-        PROCESS_VAL(CHANDELIER);
-        PROCESS_VAL(EPEE);
+        PROCESS_VAL(COUPE_DE_VIN, |-Coup de vin-| );
+        PROCESS_VAL(PORTE,        |----Porte----| );
+        PROCESS_VAL(TABLE,        |----Table----| );
+        PROCESS_VAL(BAGUE,        |----Bague----| );
+        PROCESS_VAL(CHANDELIER,   |--Chandelier-| );
+        PROCESS_VAL(EPEE,         |-----Épée----| );
+        default: s="nan"; break;
     }
 #undef PROCESS_VAL
 
     return out << s;
 }
 using namespace  std;
-struct objet{
+
+class objet{
+
 public:
-    chrono::system_clock::time_point begin;
-    chrono::system_clock::time_point end;
-    char * beginTime;
-    char * endTime;
-    std::time_t end_time;
+    thread::id id;
+    int index = 0;
+    time_t begin;
+    time_t end;
+    struct tm * beginTime;
+    struct tm * endTime;
     State state;
-    element ressource[2];
+    element ressource[2]{};
     ElemState elemState[2] = {NOT_REQUESTED, NOT_REQUESTED};
     Type type;
     string status[10] = {" nan ", " nan ", " nan "," nan ", " nan "," nan ", " nan "," nan "};
     int InstanceId = 0;
-    objet(Type t , const element (&elements)[2]) {
+    objet(Type t , const element (&elements)[2], int id) {
+        index = id;
         ressource[0] = elements[0];
         ressource[1] = elements[1];
         type = t;
@@ -93,41 +109,71 @@ public:
         status[threadobjet] = t;
 
     }
+
     void setInstanceId(int i){
         InstanceId = i;
         status[objetId] = to_string(i);
     }
-    void startClock(){
-        begin = chrono::system_clock::now();
-        beginTime = Time(begin);
-    }
-    void stopClock(){
-        end = chrono::system_clock::now();
-        endTime = Time(end);
-    }
-    chrono::duration<double> timeElapsed(){
-        return end-begin;
-    }
-    char* Time(chrono::system_clock::time_point t){
-        std::time_t end_time = std::chrono::system_clock::to_time_t(t);
-        return ctime(&end_time);
-    }
     void displayTime(){
-
-        cout        << "began computation at " << Time(begin)
-                    << "finished computation at " << Time(end)
-                    << "elapsed time: " << timeElapsed().count() << "s"
-                     << endl;
-
+        printf("%s to %s \n", asctime(beginTime), asctime(endTime));
     }
-    void displayStatus(sem_t sem){
-        //sem_wait(&sem);
-        //for (auto &s: status) {
-        //    cout << s;
-        //}
-        cout << type << state << ressource[0] << elemState[0] << ressource[1] << elemState[1] << beginTime<< endTime;
-        cout << endl;
-        //sem_post(&sem);
+    void displayStatus(){
+
+        sem_wait(&clockSem);    //attend que le buffer cout soit remplis (tout dans l'ordre)
+        cout << id << type << state << elemState[0] << ressource[0]  << elemState[1] << ressource[1] << endl;
+        sem_post(&clockSem);
+        sem_post(&printSem);    //attend que le changement d'état soit afficher au terminal (évite de passer des messages)
+    }
+    bool allocate(){
+        int i = type;
+        if (sem_trywait(&sem_elements[ressource[0]])){
+            elemState[0] = ALLOCATED;
+        } else{
+            state = BLOCKED;
+            elemState[0]= AWAITING;
+            displayStatus();
+            sem_wait(&printSem);
+            sem_wait(&priority);
+            return false;
+        }
+        if (sem_trywait(&sem_elements[ressource[1]])) {
+            state = INITIATING;
+            elemState[1] = ALLOCATED;
+        } else {
+            state = BLOCKED;
+            elemState[1]= AWAITING;
+            sem_wait(&sem_elements[ressource[1]]);
+            displayStatus();
+            sem_wait(&printSem);
+            sem_post(&priority);
+            elemState[0]= ALLOCATED;
+
+        }
+        return true;
+    }
+
+
+    void deAllocate(){
+        sem_post(&sem_elements[ressource[0]]);
+        elemState[0] = FREE;
+        sem_post(&sem_elements[ressource[1]]);
+        elemState[1] = FREE;
+    }
+    void make(){
+        id =this_thread::get_id();
+        displayStatus();
+        sem_wait(&printSem);
+        while(!allocate()){
+        };
+        sleep(1);
+        state = COMPLETED;
+        deAllocate();
+        displayStatus();
+        sem_wait(&printSem);
+
+        //removeObject(&o);
+        sem_post(&sem_objet[type]);
+        sem_post(&threadsSem);
     }
 };
 
